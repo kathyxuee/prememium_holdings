@@ -27,33 +27,44 @@ class Player(Bot):
         Nothing.
         '''
         
-    def calc_strength(self, hole, iters):
-        ''' 
-        Using MC with iterations to evalute hand strength 
+    def calc_strength(self, hole, round_state, iters):
+        '''
+        A Monte carlo method that estimates the win probability of a pair of hole cards 
 
-        Args: 
-        hole - our hole carsd 
-        iters - number of times we run MC 
+        Args:
+        hole: list of 2 hole cards 
+        iters: number of times the sim is run
         '''
 
-        deck = eval7.Deck() # deck of cards
-        hole_cards = [eval7.Card(card) for card in hole] # our hole cards in eval7 friendly format
+        deck = eval7.Deck() #deck of cards
+        hole_cards = [eval7.Card(card) for card in hole] #list of our hole cards
 
-        for card in hole_cards: #removing our hole cards from the deck
+        street = round_state.street
+        _board_cards = round_state.deck[:street]
+        board_cards = [eval7.Card(card) for card in _board_cards]
+
+        for card in hole_cards:
             deck.cards.remove(card)
-        
-        score = 0 
 
-        for _ in range(iters): # MC the probability of winning
+        for card in board_cards:
+            deck.cards.removed(card)
+
+        score = 0
+
+        for _ in range(iters):
             deck.shuffle()
 
-            _OPP = 2 
-            _COMM = 5
+            _OPP = 2
 
-            draw = deck.peek(_OPP + _COMM)
+            if street<3:
+                _COMM = 5
+            else:
+                _COMM = 5 - street
+            
+            draw = deck.peek(_COMM+_OPP)
 
             opp_hole = draw[:_OPP]
-            community = draw[_OPP:]
+            community = draw[_OPP:] + extend(board_cards)
 
             our_hand = hole_cards + community
             opp_hand = opp_hole + community
@@ -61,17 +72,19 @@ class Player(Bot):
             our_hand_value = eval7.evaluate(our_hand)
             opp_hand_value = eval7.evaluate(opp_hand)
 
-
             if our_hand_value > opp_hand_value:
                 score += 2 
-            elif our_hand_value == opp_hand_value:
+            
+            if our_hand_value == opp_hand_value:
                 score += 1 
-            else: 
-                score += 0        
-
-        hand_strength = score/(2*iters) # win probability 
+            
+            else:
+                score += 0
+        
+        hand_strength = score/(2*iters)
 
         return hand_strength
+
     
 
     def handle_new_round(self, game_state, round_state, active):
@@ -146,7 +159,7 @@ class Player(Bot):
 
         # raise logic 
         if street <3: #preflop 
-            raise_amount = int(my_pip + continue_cost + 0.4*(pot_total + continue_cost))
+            raise_amount = int(my_pip + continue_cost + 0.2*(pot_total + continue_cost))
         else: #postflop
             raise_amount = int(my_pip + continue_cost + 0.75*(pot_total + continue_cost))
 
@@ -164,7 +177,35 @@ class Player(Bot):
             temp_action = FoldAction() 
 
         _MONTE_CARLO_ITERS = 100
-        strength = self.calc_strength(my_cards, _MONTE_CARLO_ITERS)
+
+        
+        def foresight(iters, hand): # while evaluating card strength, we consider how strong the hand would be in the future
+            '''
+            avg_strength[0] tells us the average card strength after 1 swap
+            avg_strength[1] tells us avg strength after the 2nd swap
+            '''
+            total_strength = [0,0]
+            for i in range(iters):
+                if random.random() < 0.1:
+                    hand[0] == round_state.deck[street]
+                    round_state.pop(street)
+                if random.random() < 0.1:
+                    hand[1] == round_state.deck[street]
+                    round_state.pop(street)
+
+                total_strength[0] += self.calc_strength(hand, round_state, iters)
+
+                if random.random() < 0.05:
+                    hand[0] == round_state.deck[street]
+                    round_state.pop(street)
+                if random.random() < 0.05:
+                    hand[1] == round_state.deck[street]
+                    round_state.pop(street)
+                total_strength[1] += self.calc_strength(hand, round_state)
+            avg_strength = [total_strength[0]/iters+total_strength[1]/iters]
+            return avg_strength
+        future_strength = foresight(100, my_cards)
+
 
         if continue_cost > 0: 
             _SCARY = 0
@@ -194,7 +235,7 @@ class Player(Bot):
                 my_action = CheckAction()
             
 
-        return my_action
+            return my_action
         
 
 
